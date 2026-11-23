@@ -1,0 +1,1 @@
+{"name":"pfm-shared","private":true,"description":"Shared app code imported by ../pfm-fiu-backend","dependencies":{"jose":"6.2.15"}}

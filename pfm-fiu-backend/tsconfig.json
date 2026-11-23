@@ -1,0 +1,8 @@
+{
+  "compilerOptions": {
+    "target": "ES2022", "module": "ESNext", "moduleResolution": "bundler", "lib": ["ES2022", "DOM"],
+    "strict": true, "noEmit": true, "skipLibCheck": true, "resolveJsonModule": true,
+    "isolatedModules": true, "allowImportingTsExtensions": true, "types": ["bun"]
+  },
+  "include": ["src", "../pfm-client/src"]
+}

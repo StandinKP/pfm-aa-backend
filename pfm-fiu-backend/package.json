@@ -1,0 +1,19 @@
+{
+  "name": "pfm-fiu-backend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "MOCK FIU backend for the PFM app: authenticates the app, holds the queue-requester identity, relays the job and the sealed reply. Synthetic data only.",
+  "scripts": {
+    "start": "bun src/main.ts",
+    "typecheck": "tsc --noEmit -p .",
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.4",
+    "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "@noble/ciphers": "^2.4.0"
+  }
+}
