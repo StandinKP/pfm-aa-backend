@@ -1,9 +1,11 @@
 """
-TEE connectivity agent — runs inside a GCP Confidential VM and exercises the
-full demo Account Aggregator flow against our own aa-backend (Cloud Run),
-then categorises the fetched statement with Kaushal's actual distilled model
-(categorise.py + models/pfm-student.npz, copied unmodified from his
-pfm_agent) and posts the result back so the app can display it.
+Standalone connectivity smoke test — NOT the production trigger path.
+
+Runs inside a GCP Confidential VM and exercises the full demo Account
+Aggregator flow against our own aa-backend (Cloud Run) end to end: its own
+OTP login, link, consent handle + approval, fetch, categorise with the
+distilled PFM model (categorise.py + models/pfm-student.npz, copied
+unmodified from the pfm_agent handoff), and publish the result back.
 
 This is deliberately the "our own TEE" path, not Octic's Airlock: the agent
 code here makes an ordinary outbound HTTPS call, which is exactly what the
@@ -11,15 +13,18 @@ Airlock-hosted pfm_agent cannot do (it only has a local Unix-socket gate).
 Synthetic data only — same demo OTPs/identifiers as the rest of this repo;
 the statement content itself is real anonymised BS_Data (account redacted
 at source).
+
+For the real per-consent trigger — what aa-backend actually calls the
+moment a customer approves consent in the app — see server.py + run.py.
+This script stays only to prove the whole chain works end to end by hand.
 """
-import json
 import os
 import sys
 import time
 
 import requests
 
-from categorise import categorise_and_summarise
+from run import run_for_consent
 
 BASE = os.environ.get("AA_BACKEND_URL", "https://aa-demo-backend-1013365696056.asia-south1.run.app")
 MOBILE = os.environ.get("AA_DEMO_MOBILE", "8888888888")
@@ -95,20 +100,11 @@ def main() -> int:
     consent_id = consent["consentId"]
     print(f"consent status={consent['status']} consentId={consent_id}")
 
-    step("10. Fetch FI data (as the FIU, post-consent)")
-    r = session.get(f"{BASE}/v1/fi/data/{consent_id}")
-    r.raise_for_status()
-    statements = r.json()["statements"]
-    print(f"received {len(statements)} statement(s)")
-    for s in statements:
-        print(f"  {s['bank']} / {s['account']}: {len(s['transactions'])} transactions")
-
-    step("11. Categorise with Kaushal's distilled model (runs locally in this TEE)")
-    insights = categorise_and_summarise(statements)
+    step("10-11. Fetch FI data and categorise (same logic server.py triggers per-consent)")
+    insights = run_for_consent(consent_id)
     print(f"categorised {len(insights['transactions'])} transactions")
-    print(json.dumps(insights["summary"], indent=2))
 
-    step("12. Publish insights back to aa-backend")
+    step("12. Publish insights back to aa-backend (this script's own proof of outbound push)")
     r = session.post(f"{BASE}/v1/fi/insights/{consent_id}", json=insights)
     r.raise_for_status()
     print(f"posted insights for consentId={consent_id}")

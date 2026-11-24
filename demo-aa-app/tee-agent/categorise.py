@@ -1,7 +1,7 @@
 """
 tee-agent/categorise.py — PFM categorisation over BS_Data statements.
 
-Unmodified from Kaushal's pfm_agent (Octic Airlock), except MODEL_PATH: this
+Unmodified from the pfm_agent handoff (Octic Airlock), except MODEL_PATH: this
 runs in our own tee-agent image, not Octic's /opt/agent layout, so the model
 path is resolved relative to this file instead.
 

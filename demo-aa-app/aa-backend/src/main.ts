@@ -33,6 +33,12 @@ const FIPS = [
   { id: "aa-sandbox-bank", name: "AA Sandbox Bank" },
 ];
 
+// Set to the TEE agent's server.py URL (e.g. http://<tee-vm-ip>:8081) to
+// auto-trigger a categorisation run the moment consent goes ACTIVE, instead
+// of someone SSHing into the TEE VM and running agent.py by hand. Unset in
+// local/dev runs where no TEE agent is reachable.
+const TEE_AGENT_URL = process.env.TEE_AGENT_URL;
+
 const otpRequests = new Map<string, { mobile: string }>();
 const sessions = new Map<string, Session>();
 const linkRequests = new Map<string, LinkRequest>();
@@ -67,6 +73,41 @@ function bearer(req: Request): Session | null {
   const auth = req.headers.get("authorization") ?? "";
   const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
   return sessions.get(token) ?? null;
+}
+
+// Starts a run on the TEE agent and polls for its result — the same
+// start/poll/pull shape as pfm-fiu-backend's airlock.ts (startRun ->
+// poll until not "open" -> fetch reply), just pointed at our own TEE's
+// POST /v1/runs + GET /v1/runs/:id instead of Octic's Airlock API. The
+// TEE agent never calls back on its own; this backend pulls the result.
+async function triggerTeeRun(consentId: string): Promise<void> {
+  try {
+    const start = await fetch(`${TEE_AGENT_URL}/v1/runs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ consentId }),
+    });
+    if (!start.ok) throw new Error(`start run failed: ${start.status}`);
+    const { id: runId } = (await start.json()) as { id: string };
+
+    for (;;) {
+      await new Promise((r) => setTimeout(r, 3_000));
+      const poll = await fetch(`${TEE_AGENT_URL}/v1/runs/${runId}`);
+      if (!poll.ok) throw new Error(`poll run failed: ${poll.status}`);
+      const run = (await poll.json()) as { status: string; result?: unknown; error?: string };
+      if (run.status === "completed") {
+        insightsByConsentId.set(consentId, run.result);
+        console.log(`[demo-aa] TEE run ${runId} completed for consentId=${consentId}`);
+        return;
+      }
+      if (run.status === "failed") {
+        console.error(`[demo-aa] TEE run ${runId} failed for consentId=${consentId}: ${run.error}`);
+        return;
+      }
+    }
+  } catch (err) {
+    console.error(`[demo-aa] failed to run/poll TEE agent for consentId=${consentId}:`, err);
+  }
 }
 
 const server = Bun.serve({
@@ -193,6 +234,7 @@ const server = Bun.serve({
         consent.status = "ACTIVE";
         consent.accountRefs = chosen;
         consent.consentId = nextId("consent");
+        if (TEE_AGENT_URL) triggerTeeRun(consent.consentId);
         return json({ status: consent.status, consentId: consent.consentId });
       },
     },
@@ -216,8 +258,10 @@ const server = Bun.serve({
         return json({ statements });
       },
     },
-    // Our TEE-hosted agent posts its categorisation result here after
-    // fetching + categorising FI data; the app polls the GET to display it.
+    // The app polls the GET here to display the categorisation result —
+    // normally filled in by triggerTeeRun() above once a run completes.
+    // The POST exists only for agent.py's standalone smoke test, which
+    // runs its own consent end to end and pushes its result here itself.
     // No auth on the POST: this is a demo and the consentId is already the
     // unguessable capability. A real deployment would authenticate the FIU.
     "/v1/fi/insights/:consentId": {
