@@ -1,0 +1,10 @@
+{
+  "name": "aa-demo-backend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Mock Account Aggregator backend for the demo AA app. Synthetic data only, no real telephony/SMS/SIM checks.",
+  "scripts": {
+    "start": "bun src/main.ts"
+  }
+}
