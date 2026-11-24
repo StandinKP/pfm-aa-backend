@@ -1,0 +1,278 @@
+{
+  "bank": "Demo Bank",
+  "account": "REDACTED",
+  "transactions": [
+    {
+      "amount": -10000.0,
+      "balance": 11670.73,
+      "category": "Transfer to RAZ",
+      "chqNo": "",
+      "date": "2025-10-03",
+      "narration": "POS-VISA/RAZ*Kotak Mahindra BanMumbai/XXXXXXXX3601/Mumbai MH/10:58:24"
+    },
+    {
+      "amount": 279.0,
+      "balance": 11949.73,
+      "category": "Reversal",
+      "chqNo": "",
+      "date": "2025-10-04",
+      "narration": "UPI/CR/XXXXXXXX5549/Amazon I/RATN/amazon./Refund"
+    },
+    {
+      "amount": -8100.0,
+      "balance": 3849.73,
+      "category": "Transfer To Self",
+      "chqNo": "",
+      "date": "2025-10-05",
+      "narration": "UPI/DR/XXXXXXXX3145/Jane Do/KKBK/9718194/UPI"
+    },
+    {
+      "amount": -2000.0,
+      "balance": 1849.73,
+      "category": "Transfer To Self",
+      "chqNo": "",
+      "date": "2025-10-17",
+      "narration": "IMPS-OPM/XXXXXXXX9937/JANE DOE/KKBK0008121/8016/"
+    },
+    {
+      "amount": -162.01,
+      "balance": 1687.72,
+      "category": "Food",
+      "chqNo": "",
+      "date": "2025-10-21",
+      "narration": "UPI/DR/XXXXXXXX6460/ZOMATO/HDF C/payzoma/UPI"
+    },
+    {
+      "amount": 1768.82,
+      "balance": 3456.54,
+      "category": "Transfer from EXAMPLE TECHNOLOGIES INDIA PVT LTD",
+      "chqNo": "",
+      "date": "2025-10-22",
+      "narration": "NEFT/CITINXXXXXXX1720/EXAMPLE TECHNOLOGIES INDIA PVT LTD/CITI0000004/NO.1, EXAMPLE TOWER, SAMPLE ROAD, BANGALORE-560001"
+    },
+    {
+      "amount": -3300.0,
+      "balance": 156.54,
+      "category": "Transfer To Self",
+      "chqNo": "",
+      "date": "2025-10-22",
+      "narration": "IMPS-OPM/XXXXXXXX6690/JANE DOE/KKBK0008121/8016/"
+    },
+    {
+      "amount": -155.0,
+      "balance": 1.54,
+      "category": "Transfer To Self",
+      "chqNo": "",
+      "date": "2025-10-26",
+      "narration": "IMPS-OPM/XXXXXXXX4431/JANE DOE/KKBK0008121/8016/"
+    },
+    {
+      "amount": 114221.0,
+      "balance": 114222.54,
+      "category": "Salary",
+      "chqNo": "",
+      "date": "2025-10-31",
+      "narration": "NEFT/CITINXXXXXXX5487/EXAMPLE TECHNOLOGIES INDIA PVT LTD/CITI0000004/NO.1, EXAMPLE TOWER, SAMPLE ROAD, BANGALORE-560001"
+    },
+    {
+      "amount": -20000.0,
+      "balance": 94222.54,
+      "category": "Transfer To Self",
+      "chqNo": "",
+      "date": "2025-10-31",
+      "narration": "UPI/DR/XXXXXXXX4291/Jane Do/KKBK/9718194/UPI"
+    },
+    {
+      "amount": -80000.0,
+      "balance": 14222.54,
+      "category": "Transfer to JOHN SMITH",
+      "chqNo": "",
+      "date": "2025-10-31",
+      "narration": "IMPS-OPM/XXXXXXXX5445/JOHN SMITH/9229000/7197/Family"
+    },
+    {
+      "amount": 11.0,
+      "balance": 14233.54,
+      "category": "Interest",
+      "chqNo": "",
+      "date": "2025-10-31",
+      "narration": "MONTHLY SAVINGS INTEREST CREDIT"
+    },
+    {
+      "amount": -10000.0,
+      "balance": 4233.54,
+      "category": "Transfer to RAZ",
+      "chqNo": "",
+      "date": "2025-11-03",
+      "narration": "POS-VISA/RAZ*Kotak Mahindra BanMumbai/XXXXXXXX4628/Mumbai MH/04:57:05"
+    },
+    {
+      "amount": -4200.0,
+      "balance": 33.54,
+      "category": "Transfer To Self",
+      "chqNo": "",
+      "date": "2025-11-08",
+      "narration": "IMPS-OPM/XXXXXXXX1162/JANE DOE/KKBK0008121/8016/"
+    },
+    {
+      "amount": -2.0,
+      "balance": 31.54,
+      "category": "Transfer to EXAMPLE MERCHANT SERVICES BANGALOR",
+      "chqNo": "",
+      "date": "2025-11-12",
+      "narration": "POS-VISA/EXAMPLE MERCHANT SERVICES BANGALOR/XXXXXX8272/BANGALO RE/07:34:41"
+    },
+    {
+      "amount": -2.0,
+      "balance": 29.54,
+      "category": "Transfer to EXAMPLE MERCHANT SERVICES BANGALOR",
+      "chqNo": "",
+      "date": "2025-11-12",
+      "narration": "POS-VISA/EXAMPLE MERCHANT SERVICES BANGALOR/XXXXXX2349/BANGALO RE/07:35:21"
+    },
+    {
+      "amount": 1768.82,
+      "balance": 1798.36,
+      "category": "Transfer from EXAMPLE TECHNOLOGIES INDIA PVT LTD",
+      "chqNo": "",
+      "date": "2025-11-14",
+      "narration": "NEFT/CITINXXXXXXX2169/ARIBA TECHNOLOGIES INDIA PVT"
+    },
+    {
+      "amount": -1000.0,
+      "balance": 798.36,
+      "category": "Transfer To Self",
+      "chqNo": "",
+      "date": "2025-11-20",
+      "narration": "UPI/DR/XXXXXXXX6342/Jane Do/KKBK/9718194/UPI"
+    },
+    {
+      "amount": 109012.0,
+      "balance": 109810.36,
+      "category": "Salary",
+      "chqNo": "",
+      "date": "2025-11-28",
+      "narration": "NEFT/CITINXXXXXXX3408/EXAMPLE TECHNOLOGIES INDIA PVT LTD/CITI0000004/NO.1, EXAMPLE TOWER, SAMPLE ROAD, BANGALORE-560001"
+    },
+    {
+      "amount": -80000.0,
+      "balance": 29810.36,
+      "category": "Transfer to JOHN SMITH",
+      "chqNo": "",
+      "date": "2025-11-28",
+      "narration": "IMPS-OPM/XXXXXXXX3426/JOHN SMITH/9229000/7197/"
+    },
+    {
+      "amount": -25000.0,
+      "balance": 4810.36,
+      "category": "Transfer To Self",
+      "chqNo": "",
+      "date": "2025-11-29",
+      "narration": "UPI/DR/XXXXXXXX5072/Jane Do/KKBK/9718194/UPI"
+    },
+    {
+      "amount": 9.0,
+      "balance": 4819.36,
+      "category": "Interest",
+      "chqNo": "",
+      "date": "2025-11-30",
+      "narration": "MONTHLY SAVINGS INTEREST CREDIT"
+    },
+    {
+      "amount": 1768.82,
+      "balance": 6588.18,
+      "category": "Transfer from EXAMPLE TECHNOLOGIES INDIA PVT LTD",
+      "chqNo": "",
+      "date": "2025-12-05",
+      "narration": "NEFT/CITINXXXXXXX1946/ARIBA TECHNOLOGIES INDIA PVT"
+    },
+    {
+      "amount": -4000.0,
+      "balance": 2588.18,
+      "category": "Transfer To Self",
+      "chqNo": "",
+      "date": "2025-12-12",
+      "narration": "IMPS-OPM/XXXXXXXX6424/JANE DOE/KKBK0008121/8016/"
+    },
+    {
+      "amount": -500.0,
+      "balance": 2088.18,
+      "category": "Transfer to ALICE RA",
+      "chqNo": "",
+      "date": "2025-12-13",
+      "narration": "UPI/DR/XXXXXXXX6324/ALICE RA/PPIW/8586025/UPI"
+    },
+    {
+      "amount": -98.0,
+      "balance": 1990.18,
+      "category": "Groceries",
+      "chqNo": "",
+      "date": "2025-12-28",
+      "narration": "UPI/DR/XXXXXXXX5273/ZEPTO MA/UTIB/pinelab/UPI"
+    },
+    {
+      "amount": -1600.0,
+      "balance": 390.18,
+      "category": "Transfer out",
+      "chqNo": "",
+      "date": "2025-12-30",
+      "narration": "UPI/DR/XXXXXXXX8865/97181947/P PIW/9718194/UPI"
+    },
+    {
+      "amount": 121919.0,
+      "balance": 122309.18,
+      "category": "Salary",
+      "chqNo": "",
+      "date": "2025-12-31",
+      "narration": "NEFT/CITINXXXXXXX4477/EXAMPLE TECHNOLOGIES INDIA PVT LTD/CITI0000004/NO.1, EXAMPLE TOWER, SAMPLE ROAD, BANGALORE-560001"
+    },
+    {
+      "amount": -80000.0,
+      "balance": 42309.18,
+      "category": "Transfer to JOHN SMITH",
+      "chqNo": "",
+      "date": "2025-12-31",
+      "narration": "IMPS-OPM/XXXXXXXX1277/JOHN SMITH/9229000/7197/"
+    },
+    {
+      "amount": -11000.0,
+      "balance": 31309.18,
+      "category": "Transfer To Self",
+      "chqNo": "",
+      "date": "2025-12-31",
+      "narration": "IMPS-OPM/XXXXXXXX3464/JANE DOE/KKBK0008121/8016/"
+    },
+    {
+      "amount": -6000.0,
+      "balance": 25309.18,
+      "category": "Transfer to ALICE RA",
+      "chqNo": "",
+      "date": "2025-12-31",
+      "narration": "UPI/DR/XXXXXXXX5606/ALICE RA/PPIW/8586025/UPI"
+    },
+    {
+      "amount": -2000.0,
+      "balance": 23309.18,
+      "category": "Transfer To Self",
+      "chqNo": "",
+      "date": "2025-12-31",
+      "narration": "UPI/DR/XXXXXXXX3625/Jane Do/KKBK/9718194/UPI"
+    },
+    {
+      "amount": -500.0,
+      "balance": 22809.18,
+      "category": "Transfer To Self",
+      "chqNo": "",
+      "date": "2025-12-31",
+      "narration": "UPI/DR/XXXXXXXX7127/Jane Do/KKBK/9718194/UPI"
+    },
+    {
+      "amount": 10.0,
+      "balance": 22819.18,
+      "category": "Interest",
+      "chqNo": "",
+      "date": "2025-12-31",
+      "narration": "MONTHLY SAVINGS INTEREST CREDIT"
+    }
+  ]
+}
