@@ -5,11 +5,11 @@
  * the wire carries them: an `errorType` and nothing else.
  */
 import type { Job, OnEvent, Reply, Transport } from "../transport/types";
-import { EnclaveRefusal, processJob, verifyJob, type MockTrust } from "./enclave";
+import { EnclaveRefusal, processJob, verifyJob, type MockTrust, type ProcessOpts } from "./enclave";
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-export function createMockTransport(o: { trust: MockTrust; latencyMs?: number; now?: () => number }): Transport {
+export function createMockTransport(o: { trust: MockTrust; latencyMs?: number; now?: () => number; process?: ProcessOpts }): Transport {
   const wait = (ms: number) => (o.latencyMs === 0 ? Promise.resolve() : sleep(o.latencyMs ?? ms));
   return {
     name: "mock-enclave (no network)",
@@ -21,7 +21,7 @@ export function createMockTransport(o: { trust: MockTrust; latencyMs?: number; n
         say("enclave: presentation and consent credential verified");
         await wait(500);
         say("enclave: fetched mock AA data under the consent, analysed, sealed to the device key");
-        return { outcome: "ok", output: await processJob(job.body, scope) };
+        return { outcome: "ok", output: await processJob(job.body, scope, o.process) };
       } catch (e) {
         if (e instanceof EnclaveRefusal) return { outcome: "error", errorType: e.errorType };
         throw e;

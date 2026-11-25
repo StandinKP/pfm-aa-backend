@@ -18,13 +18,39 @@ export type Reply =
 
 export type OnEvent = (line: string) => void;
 
+/** Lifecycle hooks the app threads through a send/resume. All optional. */
+export interface SendHooks {
+  /** Aborting stops polling promptly; the job itself may still complete on the far side. */
+  signal?: AbortSignal;
+  /**
+   * Called with the reply `output` BEFORE the transport acknowledges it, so the app can
+   * persist the sealed reply first. If it throws the reply is not acked (redelivered).
+   */
+  beforeAck?: (output: string) => Promise<void>;
+}
+
 export interface Transport {
   readonly name: string;
-  send(job: Job, onEvent?: OnEvent): Promise<Reply>;
+  send(job: Job, onEvent?: OnEvent, hooks?: SendHooks): Promise<Reply>;
+  /**
+   * Re-attach to a job that was already sent (app killed, backgrounded, connection lost).
+   * Absent on transports that cannot (the in-process mock): the app then marks the job lost.
+   */
+  resume?(jobId: string, onEvent?: OnEvent, hooks?: SendHooks): Promise<Reply>;
 }
 
 export class TransportError extends Error {
   override name = "TransportError";
+  constructor(message: string, readonly status?: number) {
+    super(message);
+  }
+}
+
+export class CancelledError extends Error {
+  override name = "CancelledError";
+  constructor() {
+    super("cancelled");
+  }
 }
 
 export class ReplyTimeoutError extends Error {

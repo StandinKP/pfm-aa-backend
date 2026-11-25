@@ -13,11 +13,14 @@
  * (rules-local decider) from synthetic records — see fixtures/.
  */
 import { CompactEncrypt, compactVerify, decodeJwt, importJWK, type JWK } from "jose";
-import { fromUtf8, utf8 } from "../lib/bytes";
+import { fromUtf8, sha256, utf8 } from "../lib/bytes";
 import { didKeyFromP256Jwk, type P256PublicJwk } from "../lib/didkey";
 import { thumbprint } from "../lib/keys";
 import { MAX_LIFETIME_SECONDS, VC_PROFILE, payloadDigest } from "../vc/present";
 import fixture from "./fixtures/insights-customer-test-001.json";
+import records from "./fixtures/records-customer-test-001.json";
+import { normaliseNarration } from "../analysis/normalise";
+import { DELTA_SCHEMA, type DeltaDoc } from "../pfm/validate";
 
 export class EnclaveRefusal extends Error {
   constructor(readonly errorType: string) {
@@ -94,18 +97,98 @@ export async function verifyJob(body: Record<string, unknown>, jobId: string, tr
   return { customerId: String(s["customerId"]), consentId: String(s["consentId"]), accountLabels: s["accountLabels"] as string[] };
 }
 
-/** Process a verified job: scope check, "fetch" from the mock AA, seal to `replyTo`. Returns the reply `output` string. */
-export async function processJob(body: Record<string, unknown>, scope: Scope): Promise<string> {
-  const need = new Set(fixture.accounts as string[]);
-  if (![...need].every((a) => scope.accountLabels.includes(a))) refuse("ConsentRejectedError"); // reject, never trim
+export interface MockRecord {
+  txnId: string;
+  accountLabel: string;
+  type: string;
+  mode: string;
+  narration: string;
+  amount: number;
+  date: string;
+  timestamp?: string;
+  balance?: number;
+}
 
+export interface ProcessOpts {
+  /** The "AA window" the enclave would fetch under the consent. Tests inject growing windows. */
+  records?: MockRecord[];
+  /** Counts the model calls a real enclave would make (one per distinct unknown key). */
+  onModelCalls?: (n: number) => void;
+  /** Behave like an enclave that predates delta mode: ignore the `delta` block and answer with the full document. */
+  legacy?: boolean;
+}
+
+const hex = (b: Uint8Array) => [...b].map((x) => x.toString(16).padStart(2, "0")).join("");
+/** 16 hex of sha256(type|MODE|normalisedNarration) — must equal pfm-tee-kit's `key_hash`. */
+export async function keyHash16(type: string, mode: string, narration: string): Promise<string> {
+  return hex(await sha256(utf8(`${type.toLowerCase()}|${mode.toUpperCase()}|${normaliseNarration(narration)}`))).slice(0, 16);
+}
+
+function replyKeyOf(body: Record<string, unknown>): P256PublicJwk {
   const replyTo = body["replyTo"] as P256PublicJwk | undefined;
   if (!replyTo || replyTo.kty !== "EC" || replyTo.crv !== "P-256" || "d" in (replyTo as object)) refuse("ReplyKeyMissingError");
-  const key = await importJWK(replyTo as JWK, "ECDH-ES");
-  const sealed = await new CompactEncrypt(utf8(JSON.stringify(fixture)))
-    .setProtectedHeader({ alg: "ECDH-ES", enc: "A256GCM", kid: await thumbprint(replyTo as P256PublicJwk), cty: fixture.schema })
-    .encrypt(key);
+  return replyTo!;
+}
 
+const dayBefore = (iso: string) => new Date(Date.parse(`${iso}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
+
+/** Process a verified job: scope check, "fetch" from the mock AA, seal to `replyTo`. Returns the reply `output` string. */
+export async function processJob(body: Record<string, unknown>, scope: Scope, opts: ProcessOpts = {}): Promise<string> {
+  const win = (opts.records ?? (records as MockRecord[]));
+  const need = new Set(fixture.accounts as string[]);
+  if (![...need].every((a) => scope.accountLabels.includes(a))) refuse("ConsentRejectedError"); // reject, never trim
+  const replyTo = replyKeyOf(body);
+  const key = await importJWK(replyTo as JWK, "ECDH-ES");
+  const seal = async (doc: unknown, cty: string) =>
+    new CompactEncrypt(utf8(JSON.stringify(doc))).setProtectedHeader({ alg: "ECDH-ES", enc: "A256GCM", kid: await thumbprint(replyTo), cty }).encrypt(key);
+
+  if (body["delta"] !== undefined && !opts.legacy) return processDelta(body["delta"], win, seal, opts);
+
+  const sealed = await seal(fixture, fixture.schema);
   const meta = { recordsIn: fixture.recordsIn, accounts: fixture.accounts.length, decider: { backend: "mock-enclave", version: "0" }, taxonomyVersion: (fixture as { taxonomy?: string }).taxonomy ?? null };
   return JSON.stringify({ schema: "urn:sahamati:pfm-reply:1", meta, sealed, provenance: null });
+}
+
+/**
+ * Delta mode: label only what the device does not already know. Mirrors the kit's worker:
+ * records dated before `since − 1 day` are dropped; each DISTINCT key not in `known` costs one model
+ * call (here: a lookup in the golden labels); known keys cost none. No rollups, no behaviour,
+ * no nudges, no lists — the device derives those.
+ */
+async function processDelta(rawDelta: unknown, win: MockRecord[], seal: (d: unknown, cty: string) => Promise<string>, opts: ProcessOpts): Promise<string> {
+  const d = rawDelta as { since?: unknown; known?: unknown; taxonomy?: unknown } | null;
+  const since = d && typeof d.since === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d.since) ? d.since : null;
+  const knownRaw = d && d.known && typeof d.known === "object" && !Array.isArray(d.known) ? (d.known as Record<string, unknown>) : null;
+  if (!d || !knownRaw || Object.keys(knownRaw).length > 2000 || (d.since !== undefined && since === null)) return refuse("PayloadSchemaError");
+  const taxonomy = (fixture as { taxonomy?: string }).taxonomy ?? "unknown";
+  // Decisions made under another taxonomy are not reused (same rule as the kit).
+  const known: Record<string, unknown> = d.taxonomy === undefined || d.taxonomy === taxonomy ? knownRaw : {};
+  const floor = since ? dayBefore(since) : null;
+  const rows = win.filter((r) => !floor || r.date >= floor);
+
+  const golden = new Map((fixture.labels as Array<{ txnId: string; category: string; p: number; essential: boolean }>).map((l) => [l.txnId, l]));
+  const newDecisions: DeltaDoc["newDecisions"] = {};
+  const txns: DeltaDoc["txns"] = [];
+  const keysSeen = new Set<string>();
+  for (const r of rows) {
+    const k = await keyHash16(r.type, r.mode, r.narration);
+    keysSeen.add(k);
+    const hit = known[k];
+    let category: string, essential: boolean, p: number, fromCache = false;
+    if (Array.isArray(hit) && typeof hit[0] === "string" && (hit[1] === 0 || hit[1] === 1)) {
+      [category, essential, p, fromCache] = [hit[0], hit[1] === 1, 0, true]; // p unknown to the enclave; the device keeps its own
+    } else {
+      const g = golden.get(r.txnId);
+      if (!newDecisions[k]) newDecisions[k] = { category: g?.category ?? "unclassified", p: g?.p ?? 0, essential: g?.essential ?? false };
+      ({ category, essential, p } = newDecisions[k]!);
+    }
+    txns.push({ txnId: r.txnId, date: r.date, amount: r.amount, type: r.type.toLowerCase(), mode: r.mode.toUpperCase(), narration: normaliseNarration(r.narration), accountLabel: r.accountLabel,
+      category, p, essential, k, fromCache, ...(r.balance !== undefined ? { balance: r.balance } : {}), ...(r.timestamp ? { timestamp: r.timestamp } : {}) });
+  }
+  const modelCalls = Object.keys(newDecisions).length;
+  opts.onModelCalls?.(modelCalls);
+  const doc: DeltaDoc = { schema: DELTA_SCHEMA, taxonomy, since, recordsIn: rows.length, txns, newDecisions };
+  const meta = { recordsIn: rows.length, accounts: new Set(rows.map((r) => r.accountLabel)).size, keys: keysSeen.size, modelCalls, keysCached: keysSeen.size - modelCalls,
+    decider: { backend: "mock-enclave", version: "0" }, taxonomyVersion: taxonomy };
+  return JSON.stringify({ schema: "urn:sahamati:pfm-reply:1", meta, sealed: await seal(doc, DELTA_SCHEMA), provenance: null });
 }

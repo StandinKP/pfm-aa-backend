@@ -4,18 +4,18 @@ import { createMockIssuer } from "../../pfm-client/src/mock/issuer";
 import { createMockTransport } from "../../pfm-client/src/mock/transport";
 import { loadOrCreateDeviceKeys, memoryKeyStore, publicJwk } from "../../pfm-client/src/lib/keys";
 import { createRelayTransport, relayConfig, relayCredentials, relayLatest, relayLogin } from "../../pfm-client/src/transport/relay";
-import { requestInsights, type SessionDeps } from "../../pfm-client/src/pfm/session";
+import { requestDelta, requestInsights, type SessionDeps } from "../../pfm-client/src/pfm/session";
 import { resolveNames } from "../../pfm-client/src/transport/names";
 import { didKeyFromP256Jwk } from "../../pfm-client/src/lib/didkey";
 
 const URL_ = "http://backend.test";
 
-async function boot(opts: { transportDelayMs?: number } = {}) {
+async function boot(opts: { transportDelayMs?: number; fetchBudget?: { monthlyCap?: number; now?: () => Date } } = {}) {
   const names = resolveNames("sandbox", "pfm");
   const issuer = await createMockIssuer();
   const inner = createMockTransport({ trust: { issuerJwk: issuer.publicJwk, workloadAudience: names.audience, seen: new Set() }, latencyMs: opts.transportDelayMs ?? 0 });
   const logs: string[] = [];
-  const handler = createHandler({ transport: inner, audience: names.audience, issuer, log: (e, f) => logs.push(JSON.stringify({ e, ...f })) });
+  const handler = createHandler({ transport: inner, audience: names.audience, issuer, fetchBudget: opts.fetchBudget, log: (e, f) => logs.push(JSON.stringify({ e, ...f })) });
   const fetchImpl = ((u: string, init?: RequestInit) => handler(new Request(u, init))) as unknown as typeof fetch;
   const keys = await loadOrCreateDeviceKeys(memoryKeyStore());
   const token = await relayLogin(URL_, "customer-test-001", fetchImpl);
@@ -97,5 +97,35 @@ describe("mock FIU backend", () => {
     const no = await b.handler(new Request(`${URL_}/v1/config`, { headers: { origin: "https://evil.example" } }));
     expect(ok.headers.get("access-control-allow-origin")).toBe("http://localhost:1420");
     expect(no.headers.get("access-control-allow-origin")).toBeNull();
+  });
+});
+
+describe("delta jobs through the relay", () => {
+  test("a delta job works through the relay and fits the body cap with a full decision cache", async () => {
+    const b = await boot();
+    const known: Record<string, [string, 0 | 1]> = {};
+    for (let i = 0; i < 600; i++) known[i.toString(16).padStart(16, "0")] = ["entertainment", 1]; // the client's maxKnown
+    const res = await requestDelta(b.deps, { known });
+    expect(res.delta.txns.length).toBe(91);
+    // job body (VP + 600 known keys) stays well under the relay's cap
+    expect(JSON.stringify({ known }).length).toBeLessThan(MAX_BODY_BYTES / 2);
+  });
+
+  test("the monthly fetch budget is enforced by the backend: 429, no job sent, and a new month resets it", async () => {
+    let now = new Date("2026-09-10T10:00:00Z");
+    const b = await boot({ fetchBudget: { monthlyCap: 2, now: () => now } });
+    await requestDelta(b.deps, { known: {} });
+    await requestDelta(b.deps, { known: {} });
+    await expect(requestDelta(b.deps, { known: {} })).rejects.toMatchObject({ status: 429, message: expect.stringContaining("monthly fetch budget used") });
+    expect(b.logs.filter((l) => l.includes("job_relayed"))).toHaveLength(2);
+    now = new Date("2026-10-01T00:00:01Z");
+    await requestDelta(b.deps, { known: {} });
+  });
+
+  test("full (non-delta) jobs do not spend the fetch budget", async () => {
+    const b = await boot({ fetchBudget: { monthlyCap: 1 } });
+    await b.run();
+    await b.run();
+    await requestDelta(b.deps, { known: {} });
   });
 });

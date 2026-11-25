@@ -1,25 +1,19 @@
 /**
- * PFM client — UI shell. All data reaches the DOM through textContent (record
- * narrations are untrusted strings); there is no innerHTML anywhere.
+ * PFM client — view layer. State lives in src/state (store + controller); this file renders it and
+ * dispatches intents. All data reaches the DOM through textContent (record narrations are untrusted
+ * strings); there is no innerHTML anywhere.
  */
 import { loadOrCreateDeviceKeys, indexedDbKeyStore, publicJwk, thumbprint, type DeviceKeys } from "./lib/keys";
 import { didKeyFromP256Jwk } from "./lib/didkey";
 import { openKV, type KV } from "./lib/storage";
-import { createMockIssuer } from "./mock/issuer";
-import { createMockTransport } from "./mock/transport";
-import { createKmsCall, createQueueCrypto } from "./transport/envelope";
-import { createPubSubClient } from "./transport/pubsubClient";
-import { createPubSubTransport } from "./transport/pubsub";
-import { resolveNames, type Env } from "./transport/names";
-import { PfmRequestError, requestInsights, type Insights, type InsightsResult } from "./pfm/session";
-import { parseBundle } from "./vc/credentials";
+import type { Env } from "./transport/names";
+import type { Insights } from "./pfm/session";
 import { fetchChain, runViaAirlock, RunFailedError, type Evidence } from "./transport/airlockRuns";
-import { createRelayTransport, relayConfig, relayCredentials, relayLogin } from "./transport/relay";
-import type { Transport } from "./transport/types";
-
-interface Config { mode: "mock" | "relay" | "airlock" | "pubsub"; env: Env; partner: string; relayUrl: string }
-// Default: the Cloud Run mock FIU backend (sahamati-labs, asia-south1). Mock mode needs no network.
-const DEFAULTS: Config = { mode: "relay", env: "sandbox", partner: "pfm", relayUrl: "https://pfm-fiu-backend-334610188311.asia-south1.run.app" };
+import { relayLogin } from "./transport/relay";
+import { createStore } from "./state/store";
+import { initialState, reduce, type Action, type AppState } from "./state/app";
+import { DEFAULTS, type Config } from "./state/config";
+import { createController } from "./state/controller";
 
 type Child = Node | string;
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, attrs: Record<string, string> = {}, ...kids: Child[]): HTMLElementTagNameMap[K] {
@@ -30,22 +24,22 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, attrs: Record<string,
 }
 const inr = (n: number) => "₹" + Math.round(n).toLocaleString("en-IN");
 
+/** What the renderer needs; both the derived ledger insights and an Airlock answer satisfy it. */
+type View = Pick<Insights, "recordsIn" | "accounts" | "totals" | "outflowsByCategory"> & Partial<Pick<Insights, "period" | "nudges" | "decider" | "months">> & { recurring?: Array<{ narration: string; cadence: string; medianAmount: number; nextExpected: string }> };
+
 async function main() {
   const root = document.getElementById("app")!;
   const kv: KV = await openKV();
   const cfg: Config = { ...DEFAULTS, ...((await kv.get<Config>("config")) ?? {}) };
   const keys: DeviceKeys = await loadOrCreateDeviceKeys(indexedDbKeyStore());
-  const holderJwk = await publicJwk(keys.holder.publicKey);
-  const holderDid = didKeyFromP256Jwk(holderJwk);
+  const holderDid = didKeyFromP256Jwk(await publicJwk(keys.holder.publicKey));
   const replyKid = await thumbprint(await publicJwk(keys.reply.publicKey));
-  let token = ""; // memory only — never persisted
 
-  const logEl = el("pre", { class: "log", "aria-live": "polite" });
-  const say = (l: string) => { logEl.append(`${new Date().toLocaleTimeString()}  ${l}\n`); logEl.scrollTop = logEl.scrollHeight; };
-  const resultEl = el("div");
-  const goBtn = el("button", {}, "Get my spending insights");
-  const status = el("div", { class: "muted" });
+  const store = createStore<AppState, Action>(reduce, initialState(cfg));
+  const ctl = createController({ kv, keys, store });
+  const s = ctl.secrets;
 
+  // --- inputs (static: never rebuilt, so focus and typing survive re-renders) ---
   const mode = el("select", {}, el("option", { value: "mock" }, "Mock enclave (offline)"), el("option", { value: "relay" }, "FIU backend (relay)"), el("option", { value: "airlock" }, "FIU backend (Airlock)"), el("option", { value: "pubsub" }, "Pub/Sub queue (sandbox/preprod)"));
   mode.value = cfg.mode;
   const env = el("select", {}, el("option", { value: "sandbox" }, "sandbox"), el("option", { value: "preprod" }, "preprod"));
@@ -62,68 +56,98 @@ async function main() {
     el("label", {}, "Credentials (agent + consent, from your issuer)", bundleIn));
   const accessIn = el("input", { type: "password", autocomplete: "off", autocapitalize: "none", spellcheck: "false" });
   const accessBox = el("div", {}, el("label", {}, "Access key (Airlock backend; kept in memory only)", accessIn));
-  const syncMode = () => { accessBox.style.display = mode.value === "airlock" ? "" : "none"; syncMode2(); };
-  const syncMode2 = () => { queueBox.style.display = mode.value === "pubsub" ? "" : "none"; relayBox.style.display = mode.value === "relay" || mode.value === "airlock" ? "" : "none"; };
-  mode.onchange = syncMode; syncMode();
 
-  async function transport(): Promise<{ t: Transport; creds: Parameters<typeof requestInsights>[0]["credentials"]; audience: string }> {
-    if (mode.value === "mock") {
-      const names = resolveNames("sandbox", "pfm");
-      const issuer = await createMockIssuer();
-      const t = createMockTransport({ trust: { issuerJwk: issuer.publicJwk, workloadAudience: names.audience, seen: new Set() } });
-      return { t, creds: (h) => issuer.issue(h), audience: names.audience };
-    }
-    if (mode.value === "relay") {
+  const readConfig = (): Config => ({ mode: mode.value as Config["mode"], env: env.value as Env, partner: partner.value.trim(), relayUrl: relayIn.value.trim() });
+  const onConfig = () => ctl.setConfig(readConfig());
+  for (const i of [mode, env, partner, relayIn]) i.addEventListener("change", onConfig);
+  tokenIn.addEventListener("input", () => { s.token = tokenIn.value; });
+  bundleIn.addEventListener("input", () => { s.bundleText = bundleIn.value; });
+  accessIn.addEventListener("input", () => { s.accessKey = accessIn.value; });
+  const syncBoxes = () => {
+    accessBox.style.display = mode.value === "airlock" ? "" : "none";
+    queueBox.style.display = mode.value === "pubsub" ? "" : "none";
+    relayBox.style.display = mode.value === "relay" || mode.value === "airlock" ? "" : "none";
+  };
+  mode.addEventListener("change", syncBoxes);
+  syncBoxes();
+
+  // --- actions ---
+  const goBtn = el("button", {}, "Get my spending insights");
+  const cancelBtn = el("button", { class: "secondary" }, "Cancel");
+  const resumeBtn = el("button", {}, "Resume");
+  const forget = el("button", { class: "secondary" }, "Forget this device");
+  const status = el("div", { class: "muted", role: "status", "aria-live": "polite" });
+  const meta = el("div", { class: "muted" });
+  const logEl = el("pre", { class: "log", "aria-live": "polite" });
+  const resultEl = el("div");
+  const airlockEl = el("div"); // Airlock answers are not part of the ledger (the backend opens them)
+  let airlockBusy = false;
+
+  async function runAirlock() {
+    airlockBusy = true; airlockEl.replaceChildren(); status.className = "muted"; syncView();
+    try {
       const url = relayIn.value.trim();
-      const conf = await relayConfig(url);
-      const tok = await relayLogin(url, "customer-test-001");
-      return { t: createRelayTransport({ baseUrl: url, token: tok }), audience: conf.audience, creds: (h) => relayCredentials(url, tok, h) };
-    }
-    if (!token.trim()) throw new Error("paste an access token first");
-    const names = resolveNames(env.value as Env, partner.value.trim());
-    const supplier = async () => token.trim();
-    const t = createPubSubTransport({ names, pubsub: createPubSubClient(supplier), crypto: createQueueCrypto({ requestKek: names.requestKek, replyKek: names.replyKek, kms: createKmsCall(supplier) }) });
-    return {
-      t, audience: names.audience,
-      creds: async () => {
-        const raw = bundleIn.value.trim() ? JSON.parse(bundleIn.value) : await kv.get("bundle");
-        const b = parseBundle(raw);
-        await kv.set("bundle", b); // synthetic-only in sandbox; guard enforces it
-        return b;
-      },
-    };
+      const tok = await relayLogin(url, "customer-test-001", fetch, accessIn.value.trim() || undefined);
+      store.dispatch({ t: "log", line: "airlock run: the FIU backend runs it; the app holds no Airlock secret" });
+      const r = await runViaAirlock({ baseUrl: url, token: tok, onStage: (st, runId) => { status.textContent = `Working… (${st.replace(/_/g, " ")})`; store.dispatch({ t: "log", line: `stage: ${st}${runId ? ` · run ${runId}` : ""}` }); } });
+      status.textContent = "";
+      airlockEl.replaceChildren(renderAnswer(r.answer), renderEvidence(r.evidence, () => fetchChain(url, tok, r.id)));
+    } catch (e) {
+      const m = e instanceof RunFailedError ? `The run did not produce a reply: ${e.message}` : e instanceof Error ? e.message : String(e);
+      status.className = "err"; status.textContent = m;
+    } finally { airlockBusy = false; syncView(); }
   }
 
-  goBtn.onclick = async () => {
-    goBtn.disabled = true; resultEl.replaceChildren(); status.textContent = "";
-    await kv.set("config", { mode: mode.value as Config["mode"], env: env.value as Env, partner: partner.value.trim(), relayUrl: relayIn.value.trim() } satisfies Config);
-    try {
-      if (mode.value === "airlock") {
-        const url = relayIn.value.trim();
-        const tok = await relayLogin(url, "customer-test-001", fetch, accessIn.value.trim() || undefined);
-        say("airlock run: the FIU backend runs it; the app holds no Airlock secret");
-        const r = await runViaAirlock({ baseUrl: url, token: tok, onStage: (st, runId) => { status.textContent = `Working… (${st.replace(/_/g, " ")})`; say(`stage: ${st}${runId ? ` · run ${runId}` : ""}`); } });
-        status.textContent = "";
-        resultEl.replaceChildren(renderAnswer(r.answer), renderEvidence(r.evidence, () => fetchChain(url, tok, r.id)));
-        return;
-      }
-      const { t, creds, audience } = await transport();
-      say(`transport: ${t.name}`);
-      const res = await requestInsights({ keys, transport: t, credentials: creds, audience }, undefined, say);
-      await kv.set("lastSealed", { jobId: res.jobId, sealed: res.sealed }); // ciphertext only
-      resultEl.replaceChildren(render(res));
-      status.textContent = "";
-    } catch (e) {
-      const m = e instanceof RunFailedError ? `The run did not produce a reply: ${e.message}` : e instanceof PfmRequestError ? `Refused by the enclave: ${e.errorType}` : e instanceof Error ? e.message : String(e);
-      status.className = "err"; status.textContent = m; say(`error: ${m}`);
-    } finally { goBtn.disabled = false; }
+  goBtn.onclick = () => (mode.value === "airlock" ? void runAirlock() : void ctl.refresh());
+  resumeBtn.onclick = () => void ctl.resume();
+  cancelBtn.onclick = () => ctl.cancel();
+  forget.onclick = async () => {
+    if (!confirm("Delete the device keys, the stored ledger and cached credentials? This cannot be undone.")) return;
+    await ctl.forget();
+    location.reload();
   };
 
-  const forget = el("button", { class: "secondary" }, "Forget this device");
-  forget.onclick = async () => {
-    if (!confirm("Delete the device keys and stored data? Past sealed replies become unreadable.")) return;
-    indexedDB.deleteDatabase("pfm-device"); await kv.delete("bundle"); await kv.delete("lastSealed"); location.reload();
-  };
+  // --- render from state ---
+  function syncView() {
+    const st = store.get();
+    const working = st.phase === "working" || airlockBusy;
+    const airlock = st.config.mode === "airlock";
+    goBtn.disabled = working || (!airlock && st.cadence?.manualAllowed === false);
+    goBtn.textContent = airlock ? "Get my spending insights" : st.ledgerTxns ? "Refresh" : "Get my spending insights";
+    cancelBtn.style.display = st.phase === "working" && !airlock ? "" : "none";
+    resumeBtn.style.display = st.phase === "interrupted" && st.pendingJobId ? "" : "none";
+    if (!airlockBusy && !(status.className === "err" && airlockEl.childNodes.length === 0 && st.phase === "idle" && !st.status)) {
+      status.className = st.phase === "error" ? "err" : "muted";
+      status.textContent = st.status;
+    }
+    const lines: string[] = [];
+    if (st.cadence && !airlock && st.ledgerTxns) {
+      if (st.cadence.lastFetchAt) lines.push(`Last updated ${new Date(st.cadence.lastFetchAt).toLocaleString()}`);
+      lines.push(st.cadence.due ? "A refresh is due." : st.cadence.nextDueAt ? `Next refresh due ${new Date(st.cadence.nextDueAt).toLocaleDateString()}.` : "");
+      lines.push(`${st.cadence.fetchesLeft} fetches left this month.`);
+      if (st.cadence.reason && st.cadence.manualAllowed === false) lines.push(st.cadence.reason);
+    }
+    if (st.lastRun) lines.push(`Last refresh: ${st.lastRun.newTxns} new transactions · ${st.lastRun.modelCalls} model decisions · ${st.lastRun.keysCached} reused from this device.`);
+    meta.textContent = lines.filter(Boolean).join(" ");
+    logEl.textContent = st.log.join("\n");
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+  let lastInsights: AppState["insights"] | undefined;
+  let lastLegacy: AppState["legacy"] | undefined;
+  store.subscribe((st) => {
+    syncView();
+    if (st.insights !== lastInsights || st.legacy !== lastLegacy) {
+      lastInsights = st.insights;
+      lastLegacy = st.legacy;
+      resultEl.replaceChildren(
+        ...(st.insights
+          ? [render(st.insights as unknown as View, `Derived on this device from ${st.ledgerTxns} stored transactions`)]
+          : st.legacy && isInsights(st.legacy)
+            ? [render(st.legacy, "Full result from an enclave without incremental mode (not stored)")]
+            : []),
+      );
+    }
+  });
 
   root.append(
     el("h1", {}, "PFM insights"),
@@ -131,10 +155,12 @@ async function main() {
     el("div", { class: "card" }, el("h2", {}, "This device"),
       el("div", { class: "kv" }, el("span", {}, "Holder DID"), el("span", {}, holderDid), el("span", {}, "Reply key"), el("span", {}, replyKid))),
     el("div", { class: "card" }, el("h2", {}, "Connection"), el("label", {}, "Transport", mode), relayBox, accessBox, queueBox),
-    el("div", { class: "row" }, goBtn, forget), status,
+    el("div", { class: "row" }, goBtn, cancelBtn, resumeBtn, forget), status, meta,
     el("div", { class: "card" }, el("h2", {}, "Activity"), logEl),
-    resultEl,
+    resultEl, airlockEl,
   );
+  await ctl.boot();
+  syncView();
 }
 
 const isInsights = (a: unknown): a is Insights =>
@@ -142,7 +168,7 @@ const isInsights = (a: unknown): a is Insights =>
 
 /** The agent's JSON shape is the agent builder's to define: render the PFM shape when it matches, else show it raw. */
 function renderAnswer(a: unknown): HTMLElement {
-  if (isInsights(a)) return render({ jobId: "", insights: a, meta: {}, sealed: "", provenance: null }, "Opened by the FIU backend (not end-to-end sealed to this device)");
+  if (isInsights(a)) return render(a, "Opened by the FIU backend (not end-to-end sealed to this device)");
   const box = el("div", { class: "card" }, el("h2", {}, "Agent reply"));
   box.append(el("pre", { class: "log" }, JSON.stringify(a, null, 2)));
   return box;
@@ -170,8 +196,7 @@ function renderEvidence(ev: Evidence | undefined, chain: () => Promise<string>):
   return box;
 }
 
-function render(r: InsightsResult, note = "Decrypted on this device"): HTMLElement {
-  const d: Insights = r.insights;
+function render(d: View, note = "Decrypted on this device"): HTMLElement {
   const box = el("div", { class: "card" });
   box.append(el("h2", {}, "Your spending"));
   if (d.period) box.append(el("div", { class: "muted" }, `${d.period.from} → ${d.period.to} · ${d.recordsIn} transactions · ${d.accounts.length} accounts`));
@@ -189,8 +214,18 @@ function render(r: InsightsResult, note = "Decrypted on this device"): HTMLEleme
     const bar = el("div", { class: "bar" }); bar.style.width = `${Math.round((c.total / max) * 100)}%`;
     box.append(el("div", {}, el("div", { class: "stat" }, el("span", {}, c.category), el("span", {}, inr(c.total))), bar));
   }
-  box.append(el("p", { class: "muted", style: "margin-top:14px" },
-    `${note} · decider ${d.decider?.backend ?? "?"}@${d.decider?.version ?? "?"} · reply provenance: ${r.provenance ? "present (not yet verified here)" : "none"}`));
+  if (d.months?.length) {
+    box.append(el("h2", { style: "margin-top:14px" }, "Month by month"));
+    for (const m of d.months.slice(-6)) {
+      const delta = m.spendDeltaPct != null ? ` (${m.spendDeltaPct > 0 ? "+" : ""}${m.spendDeltaPct}%)` : "";
+      box.append(el("div", { class: "stat" }, el("span", {}, m.month), el("span", {}, `${inr(m.spend)}${delta}`)));
+    }
+  }
+  if (d.recurring?.length) {
+    box.append(el("h2", { style: "margin-top:14px" }, "Recurring"));
+    for (const r of d.recurring.slice(0, 5)) box.append(el("div", { class: "stat" }, el("span", {}, `${r.narration} · ${r.cadence}`), el("span", {}, inr(r.medianAmount))));
+  }
+  box.append(el("p", { class: "muted", style: "margin-top:14px" }, `${note} · labels by ${d.decider?.backend ?? "the enclave"}${d.decider ? `@${d.decider.version}` : ""}`));
   return box;
 }
 

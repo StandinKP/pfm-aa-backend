@@ -61,7 +61,14 @@ export interface Deps {
   allowedOrigins?: string[];
   /** If set, POST /v1/session needs header `x-access-key` equal to it. Airlock mode requires one: it spends the org's system identity. */
   accessKey?: string;
+  /**
+   * Authoritative AA-fetch budget (PFM-DESIGN §11): delta jobs per customer per calendar month. The device
+   * keeps an advisory copy; this is the one that holds. In memory like every other store here (resets on restart).
+   */
+  fetchBudget?: { monthlyCap?: number; now?: () => Date };
 }
+
+export const DEFAULT_MONTHLY_FETCH_CAP = 30;
 
 interface Stored { jobId: string; output: string }
 
@@ -105,6 +112,8 @@ export function createHandler(d: Deps): (req: Request) => Promise<Response> {
   const sessions = new Map<string, string>(); // token → customerId
   const inFlight = new Set<string>(); // customerId
   const seenJobs = new Set<string>();
+  const fetches = new Map<string, { month: string; n: number }>(); // customerId → AA fetches this month
+  const fetchCap = d.fetchBudget?.monthlyCap ?? DEFAULT_MONTHLY_FETCH_CAP;
   const latest = new Map<string, Stored>(); // customerId → sealed reply
   const runs = new Map<string, RunState>(); // run handle → state (memory only; replies are derived customer facts)
 
@@ -222,6 +231,14 @@ export function createHandler(d: Deps): (req: Request) => Promise<Response> {
       }
       if (seenJobs.has(jobId)) return json(409, { error: "jobId already used" }, cors);
       if (inFlight.has(who)) return json(429, { error: "a request is already in flight" }, cors);
+      if (body.delta !== undefined) {
+        // A delta job IS an AA fetch: spend the customer's monthly budget before anything is sent.
+        const month = (d.fetchBudget?.now?.() ?? new Date()).toISOString().slice(0, 7);
+        const f = fetches.get(who);
+        const used = f && f.month === month ? f.n : 0;
+        if (used >= fetchCap) return json(429, { error: "monthly fetch budget used" }, cors);
+        fetches.set(who, { month, n: used + 1 });
+      }
       seenJobs.add(jobId);
       inFlight.add(who);
       const started = Date.now();
