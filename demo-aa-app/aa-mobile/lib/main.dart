@@ -840,10 +840,10 @@ class _OtpRowState extends State<_OtpRow> {
   }
 }
 
-/// Polls `/v1/fi/insights/:consentId` for the result our TEE-hosted agent
-/// posts after fetching and categorising the statement with Kaushal's
-/// distilled model — asynchronous, since the agent runs separately from
-/// this app, so the first look is usually "not ready yet".
+/// Polls `/v1/fi/insights/:consentId` for the result of the TEE-hosted
+/// agent run that aa-backend triggers once consent is approved —
+/// asynchronous, since the run happens separately from this app, so the
+/// first look is usually "not ready yet".
 class _InsightsPanel extends StatefulWidget {
   final Api api;
   final String consentId;
@@ -888,7 +888,7 @@ class _InsightsPanelState extends State<_InsightsPanel> {
         ),
         const SizedBox(height: 4),
         Text(
-          "Our TEE-hosted agent fetches and categorises the statement separately from this app — run it, then come back and refresh.",
+          "A TEE-hosted agent fetches and categorises the statement in the background — give it a moment and refresh.",
           style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
         ),
         const SizedBox(height: 12),
@@ -905,7 +905,7 @@ class _InsightsPanelState extends State<_InsightsPanel> {
         padding: const EdgeInsets.all(8),
         margin: const EdgeInsets.only(bottom: 12),
         decoration: BoxDecoration(color: const Color(0xFFE8F5E9), borderRadius: BorderRadius.circular(8)),
-        child: const Text('Categorised by Kaushal\'s distilled model, running inside a real Confidential VM.', style: TextStyle(fontSize: 12)),
+        child: const Text('Categorised by the distilled PFM model, running inside a real Confidential VM.', style: TextStyle(fontSize: 12)),
       ),
       Row(children: [
         Expanded(child: _statTile('Income', '₹${summary['total_income']}')),

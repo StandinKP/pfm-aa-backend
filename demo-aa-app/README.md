@@ -17,13 +17,19 @@ own TEE-hosted agent, independent of Octic's Airlock.
   placeholders (`Demo Bank`, `JANE DOE`, `JOHN SMITH`, `EXAMPLE
   TECHNOLOGIES INDIA PVT LTD`) — structure and category distribution are
   real, identities are not.
-- `tee-agent/` — runs the full AA flow (login → link → consent → fetch)
-  against `aa-backend`, then categorises the result with Kaushal's actual
-  distilled PFM model (`categorise.py` + `models/pfm-student.npz`, copied
-  unmodified from his pfm_agent handoff) and posts insights back for the
-  app to display. Runs inside a real Confidential VM (Intel TDX) on GCP —
-  attestation verified (Secure Boot + measured boot + TDX quote), not
-  simulated.
+- `tee-agent/` — categorises FI data with the distilled PFM model
+  (`categorise.py` + `models/pfm-student.npz`, copied unmodified from the
+  pfm_agent handoff) and posts insights back for the app to display.
+  Runs inside a real Confidential VM (Intel TDX) on GCP — attestation
+  verified (Secure Boot + measured boot + TDX quote), not simulated.
+  - `server.py` + `run.py` — the actual trigger path: an HTTP server
+    (`POST /v1/runs {consentId}`, `GET /v1/runs/:id`) that `aa-backend`
+    calls automatically the moment a consent goes ACTIVE, shaped like
+    `pfm-fiu-backend`'s Airlock client (`src/airlock.ts` /
+    `pfm-client/src/transport/airlockRuns.ts`) — same start-run/poll
+    pattern, just pointed at our own TEE instead of Octic's Airlock API.
+  - `agent.py` — a standalone connectivity smoke test only (its own
+    OTP/link/consent walkthrough end to end); not part of the trigger path.
 
 ## Run it
 
@@ -32,7 +38,11 @@ cd demo-aa-app/aa-backend && bun install && bun src/main.ts   # :8788
 cd demo-aa-app/aa-mobile && flutter run                        # point at :8788 via 10.0.2.2 on an emulator
 ```
 
+Set `TEE_AGENT_URL` on `aa-backend` (e.g. `http://<tee-vm-ip>:8081`) to
+auto-trigger a categorisation run on consent approval; unset, the backend
+just skips the trigger (useful for local runs with no TEE agent reachable).
+
 `tee-agent/` needs a GCP project with Compute + Artifact Registry +
 Confidential Computing APIs enabled, and a Confidential VM created with
-Secure Boot on — see inline comments in `tee-agent/agent.py` and
-`tee-agent/Dockerfile` for the exact shape.
+Secure Boot on, port 8081 reachable from `aa-backend` — see inline comments
+in `tee-agent/server.py` and `tee-agent/Dockerfile` for the exact shape.
