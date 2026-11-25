@@ -22,6 +22,9 @@ import { isPending, loadJob, saveJob, type JobRecord } from "./jobs";
 import { buildDeltaRequest, loadLedger, mergeDelta, saveLedger, type Ledger, emptyLedger } from "./ledger";
 import type { Store } from "./store";
 
+/** Refusals that mean "your credentials do not verify here", not "your request is wrong". */
+const STALE_CREDENTIALS = new Set(["PresentationInvalidError", "IssuerKeyUnauthorisedError", "ConsentVcExpiredError"]);
+
 export interface ControllerDeps {
   kv: KV;
   keys: DeviceKeys;
@@ -181,9 +184,9 @@ export function createController(d: ControllerDeps) {
         return;
       }
       const ref: { j?: JobRecord } = {};
-      await run(undefined, async (signal) => {
-        const s = await session(signal);
-        const res = await requestDelta(s, buildDeltaRequest(ledger), say, {
+      const once = async (signal: AbortSignal) => {
+        const sess = await session(signal);
+        return requestDelta(sess, buildDeltaRequest(ledger), say, {
           signal,
           onSent: async (jobId) => {
             ref.j = { jobId, mode: config().mode, status: "sent", createdAt: now().getTime(), updatedAt: now().getTime() };
@@ -192,7 +195,19 @@ export function createController(d: ControllerDeps) {
           },
           ...hooks(ref),
         });
-        return { job: ref.j, res };
+      };
+      await run(undefined, async (signal) => {
+        try {
+          return { job: ref.j, res: await once(signal) };
+        } catch (e) {
+          // Cached credentials can go stale when the far side's issuer changes (restart, new revision).
+          // The refusal happens before any work, so drop the cache and retry ONCE with fresh credentials.
+          if (!(e instanceof PfmRequestError) || !STALE_CREDENTIALS.has(e.errorType)) throw e;
+          say("credentials rejected by the enclave; fetching fresh ones and retrying once");
+          await d.kv.delete(`creds:${config().relayUrl.trim()}`);
+          const res = await once(signal);
+          return { job: ref.j, res };
+        }
       });
     },
 
